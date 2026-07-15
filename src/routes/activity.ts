@@ -1,7 +1,13 @@
 import { Hono } from "hono";
 import { requireAuth } from "../middleware/auth";
 import { perKeyRateLimit } from "../middleware/rateLimit";
-import { getActivitySummary, getWalletValue, listActivity } from "../services/activityService";
+import {
+  getActivitySummary,
+  getMonthlyActivity,
+  getWalletValue,
+  listActivity,
+} from "../services/activityService";
+import { ValidationError } from "../services/pushTokenService";
 import type { AppEnv } from "../types";
 
 export const activity = new Hono<AppEnv>();
@@ -48,4 +54,26 @@ activity.get("/value", requireAuth, perKeyRateLimit, (c) => {
  */
 activity.get("/summary", requireAuth, perKeyRateLimit, (c) => {
   return c.json(getActivitySummary(c.get("personalKeyId")));
+});
+
+/**
+ * Totals the key's incoming transfers for one calendar month (UTC): deposit
+ * count, fiat total, and per-asset breakdowns. Defaults to the current month.
+ * Months outside the activity retention window return empty or partial
+ * totals. Assets without a fresh cached price get a null fiatValue and are
+ * excluded from fiatTotal (counted in unpricedCount instead). Requires
+ * authentication.
+ *
+ * @route GET /activity/month
+ * @param {string} [query.month] - Month in YYYY-MM format (default: current UTC month).
+ * @returns {200} Month totals with count, fiatTotal, unpricedCount, and per-asset aggregates.
+ * @returns {400} month is not in YYYY-MM format.
+ */
+activity.get("/month", requireAuth, perKeyRateLimit, (c) => {
+  try {
+    return c.json(getMonthlyActivity(c.get("personalKeyId"), c.req.query("month")));
+  } catch (err) {
+    if (err instanceof ValidationError) return c.json({ error: err.message }, 400);
+    throw err;
+  }
 });

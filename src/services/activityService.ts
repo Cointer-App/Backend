@@ -2,6 +2,7 @@ import { env } from "../config/env";
 import { getDb, now } from "../db/client";
 import { getPrice } from "../prices";
 import type { ActivityRow } from "../types";
+import { ValidationError } from "./pushTokenService";
 
 const MAX_PAGE_SIZE = 100;
 
@@ -141,6 +142,79 @@ export function getActivitySummary(personalKeyId: string) {
     currency: env.prices.currency,
     priceAsOf: priceAsOf === null ? null : Math.floor(priceAsOf / 1000),
     windows,
+    assets: [...assets.values()]
+      .map((entry) => ({
+        ...entry,
+        amount: String(entry.amount),
+        fiatValue: entry.fiatValue === null ? null : Math.round(entry.fiatValue * 100) / 100,
+      }))
+      .sort((a, b) => (b.fiatValue ?? -1) - (a.fiatValue ?? -1)),
+  };
+}
+
+const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export function getMonthlyActivity(personalKeyId: string, monthRaw?: string) {
+  let month: string;
+  if (monthRaw === undefined) {
+    const d = new Date(now() * 1000);
+    month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  } else {
+    if (!MONTH_PATTERN.test(monthRaw)) {
+      throw new ValidationError("month must be in YYYY-MM format");
+    }
+    month = monthRaw;
+  }
+
+  const year = Number(month.slice(0, 4));
+  const monthIndex = Number(month.slice(5)) - 1;
+  const start = Date.UTC(year, monthIndex, 1) / 1000;
+  const end = Date.UTC(year, monthIndex + 1, 1) / 1000;
+
+  const rows = getDb()
+    .query<{ chain: string; asset: string; amount: string }, [string, number, number]>(
+      "SELECT chain, asset, amount FROM activity WHERE personal_key_id = ? AND created_at >= ? AND created_at < ?",
+    )
+    .all(personalKeyId, start, end);
+
+  let fiatTotal = 0;
+  let unpricedCount = 0;
+  let priceAsOf: number | null = null;
+
+  // Amounts are summed as Number, so totals are display precision only.
+  const assets = new Map<
+    string,
+    { chain: string; asset: string; count: number; amount: number; fiatValue: number | null }
+  >();
+
+  for (const row of rows) {
+    const fiat = fiatValueOf(row.amount, row.asset);
+    if (fiat === null) {
+      unpricedCount++;
+    } else {
+      fiatTotal += fiat.value;
+      priceAsOf = priceAsOf === null ? fiat.fetchedAt : Math.min(priceAsOf, fiat.fetchedAt);
+    }
+
+    const assetKey = `${row.chain}:${row.asset}`;
+    let entry = assets.get(assetKey);
+    if (!entry) {
+      entry = { chain: row.chain, asset: row.asset, count: 0, amount: 0, fiatValue: 0 };
+      assets.set(assetKey, entry);
+    }
+    entry.count++;
+    entry.amount += Number(row.amount);
+    if (fiat === null) entry.fiatValue = null;
+    else if (entry.fiatValue !== null) entry.fiatValue += fiat.value;
+  }
+
+  return {
+    month,
+    currency: env.prices.currency,
+    priceAsOf: priceAsOf === null ? null : Math.floor(priceAsOf / 1000),
+    count: rows.length,
+    fiatTotal: Math.round(fiatTotal * 100) / 100,
+    unpricedCount,
     assets: [...assets.values()]
       .map((entry) => ({
         ...entry,

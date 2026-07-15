@@ -376,6 +376,36 @@ Aggregates your retained activity (retention period is in `GET /capabilities`). 
 
 `windows` buckets deposits by age. Items with no fresh price are left out of `fiatTotal` and counted in `unpricedCount`. `assets` totals every retained row per asset, sorted by fiat value descending (`fiatValue: null` when unpriced).
 
+### GET /activity/month
+
+Totals your incoming transfers for one calendar month (UTC). Useful for tracking a monthly goal.
+
+Query params:
+
+| Param   | Notes                                                  |
+| ------- | ------------------------------------------------------ |
+| `month` | `YYYY-MM`, optional. Defaults to the current UTC month |
+
+**200**
+
+```json
+{
+  "month": "2026-07",
+  "currency": "usd",
+  "priceAsOf": 1712345678,
+  "count": 12,
+  "fiatTotal": 843.21,
+  "unpricedCount": 0,
+  "assets": [
+    { "chain": "bitcoin", "asset": "BTC", "count": 8, "amount": "0.0123", "fiatValue": 743.21 }
+  ]
+}
+```
+
+Deposits are priced at current cached prices, not the price at time of receipt. Items with no fresh price are left out of `fiatTotal` and counted in `unpricedCount` (`fiatValue: null` for fully unpriced assets). Only retained activity is counted (see `activityRetentionDays` in `GET /capabilities`), so months older than the retention window come back empty or partial.
+
+**400** `{ "error": "month must be in YYYY-MM format" }`
+
 ---
 
 ## Public / meta
