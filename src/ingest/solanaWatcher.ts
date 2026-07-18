@@ -140,6 +140,46 @@ async function processAddress(
   setAddressCursor(chainId, address, signatures[0]!.signature);
 }
 
+export interface SolanaBalance {
+  asset: string;
+  raw: bigint;
+  decimals: number;
+}
+
+interface TokenAccountsResponse {
+  value: { account: { data: { parsed: { info: { tokenAmount: { amount: string } } } } } }[];
+}
+
+/** Native SOL balance plus every configured SPL token balance for one address. */
+export async function fetchSolanaBalances(
+  rpcUrl: string,
+  address: string,
+  tokens: Erc20Token[],
+): Promise<SolanaBalance[]> {
+  const [lamports, ...tokenAccounts] = await Promise.all([
+    rpc<number>(rpcUrl, "getBalance", [address]),
+    ...tokens.map((token) =>
+      rpc<TokenAccountsResponse>(rpcUrl, "getTokenAccountsByOwner", [
+        address,
+        { mint: token.address },
+        { encoding: "jsonParsed" },
+      ]),
+    ),
+  ]);
+  const balances: SolanaBalance[] = [
+    { asset: "SOL", raw: BigInt(lamports), decimals: LAMPORTS_PER_SOL_DECIMALS },
+  ];
+  tokens.forEach((token, i) => {
+    const accounts = tokenAccounts[i]!.value;
+    const raw = accounts.reduce(
+      (sum, acc) => sum + BigInt(acc.account.data.parsed.info.tokenAmount.amount),
+      0n,
+    );
+    balances.push({ asset: token.ticker, raw, decimals: token.decimals });
+  });
+  return balances;
+}
+
 export async function seedSolanaAddress(personalKeyId: string, address: string): Promise<void> {
   const tokens = new Map(env.ingest.solanaSplTokens.map((t) => [t.address, t]));
   await processAddress("solana", address, tokens, async (txs) => {

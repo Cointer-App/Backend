@@ -47,6 +47,40 @@ export class EsploraHttpError extends Error {
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+interface EsploraAddressStats {
+  chain_stats: { funded_txo_sum: number; spent_txo_sum: number };
+  mempool_stats: { funded_txo_sum: number; spent_txo_sum: number };
+}
+
+/** Current balance (confirmed + unconfirmed) in base units, from Esplora's per-address summary. */
+export async function fetchAddressBalance(
+  baseUrl: string,
+  address: string,
+  logTag: string,
+): Promise<bigint | null> {
+  const res = await fetch(`${baseUrl}/address/${address}`, {
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (res.status === 429 || res.status >= 500) throw new EsploraHttpError(res.status, address);
+  if (!res.ok) {
+    console.error(`[balances:${logTag}] HTTP ${res.status} for ${address}, skipping`);
+    return null;
+  }
+  let stats: EsploraAddressStats;
+  try {
+    stats = (await res.json()) as EsploraAddressStats;
+  } catch {
+    console.error(`[balances:${logTag}] non-JSON response for ${address}, skipping`);
+    return null;
+  }
+  if (!stats.chain_stats || !stats.mempool_stats) return null;
+  const funded =
+    BigInt(stats.chain_stats.funded_txo_sum) + BigInt(stats.mempool_stats.funded_txo_sum);
+  const spent = BigInt(stats.chain_stats.spent_txo_sum) + BigInt(stats.mempool_stats.spent_txo_sum);
+  const balance = funded - spent;
+  return balance < 0n ? 0n : balance;
+}
+
 export async function fetchAddressTxs(
   baseUrl: string,
   address: string,

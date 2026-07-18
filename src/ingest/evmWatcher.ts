@@ -99,6 +99,54 @@ const toTopic = (address: string) => `0x${"0".repeat(24)}${address.slice(2)}`;
 
 const REORG_OVERLAP_BLOCKS = 2;
 
+/** keccak256("balanceOf(address)")[0:4] */
+const BALANCE_OF_SELECTOR = "0x70a08231";
+
+async function evmRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
+  const res = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`RPC ${method} responded HTTP ${res.status}`);
+  const body = (await res.json()) as { result?: T; error?: { code: number; message: string } };
+  if (body.error) throw new Error(`RPC ${method} error ${body.error.code}: ${body.error.message}`);
+  if (body.result === undefined || body.result === null)
+    throw new Error(`RPC ${method} returned no result`);
+  return body.result;
+}
+
+export interface EvmBalance {
+  asset: string;
+  raw: bigint;
+  decimals: number;
+}
+
+/** Native coin balance plus every configured ERC20 token balance for one address. */
+export async function fetchEvmBalances(
+  rpcUrl: string,
+  nativeAsset: string,
+  address: string,
+  tokens: Erc20Token[],
+): Promise<EvmBalance[]> {
+  const paddedAddress = `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
+  const [nativeHex, ...tokenResults] = await Promise.all([
+    evmRpc<string>(rpcUrl, "eth_getBalance", [address, "latest"]),
+    ...tokens.map((token) =>
+      evmRpc<string>(rpcUrl, "eth_call", [
+        { to: token.address, data: `${BALANCE_OF_SELECTOR}${paddedAddress.slice(2)}` },
+        "latest",
+      ]),
+    ),
+  ]);
+  const balances: EvmBalance[] = [{ asset: nativeAsset, raw: BigInt(nativeHex), decimals: 18 }];
+  tokens.forEach((token, i) => {
+    balances.push({ asset: token.ticker, raw: BigInt(tokenResults[i]!), decimals: token.decimals });
+  });
+  return balances;
+}
+
 export interface EvmWatcherConfig {
   chainId: string;
   nativeAsset: string;

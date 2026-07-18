@@ -162,3 +162,19 @@ export async function fetchIncomingTransfers(
     await rpc("close_wallet").catch(() => {});
   }
 }
+
+/**
+ * Total ever received on a view-only wallet, in atomic units. Not a true
+ * spendable balance: without the spend key this RPC cannot detect outgoing
+ * transfers, so it never decreases even after funds are spent elsewhere.
+ * Callers must present this as "received", not "balance".
+ */
+export async function fetchViewOnlyReceived(address: string, viewKey: string): Promise<bigint> {
+  await openOrCreateWallet(address, viewKey);
+  try {
+    const result = await rpc<{ balance: number }>("get_balance");
+    return BigInt(result.balance);
+  } finally {
+    await rpc("close_wallet").catch(() => {});
+  }
+}

@@ -7,6 +7,7 @@ import { channels } from "./channels";
 import { meta } from "./meta";
 import { personal } from "./personal";
 import { pushToken } from "./pushToken";
+import { wallets } from "./wallets";
 
 export const api = new Hono<AppEnv>();
 
@@ -17,4 +18,5 @@ api.route("/addresses", addresses);
 api.route("/channels", channels);
 api.route("/push-token", pushToken);
 api.route("/activity", activity);
+api.route("/wallets", wallets);
 api.route("/", meta);

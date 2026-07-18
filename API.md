@@ -425,6 +425,46 @@ Deposits are priced at current cached prices, not the price at time of receipt. 
 
 ---
 
+## Wallets
+
+### GET /wallets/value
+
+Live current value for every address you're watching: the actual on-chain balance right now (not just what's been received), priced at the latest cached rate. Auth required.
+
+Balances are fetched directly from each chain (Esplora for Bitcoin/Litecoin, Blockchair for Bitcoin Cash, JSON-RPC `eth_getBalance`/`balanceOf` for Ethereum/Base, `getBalance`/token accounts for Solana), so they reflect coins moving both in and out, not just deposits. Results are cached per address for ~20 seconds to limit load on upstream RPCs/explorers, so polling this endpoint faster than that returns the same numbers. A wallet with a chain it currently can't reach (RPC/explorer error) comes back with an empty `assets` array rather than failing the whole request.
+
+Each wallet's `assets` includes the native coin plus any configured tokens (ERC-20 on Ethereum/Base, SPL on Solana) with a nonzero balance.
+
+Monero addresses are watched with a view-only key (see `POST /addresses`), which can detect incoming transfers but not spends. Their `approximate` flag is `true` and their value reflects everything ever received at that address, not a live spendable balance — treat it as an upper bound, not a wallet balance.
+
+**200**
+
+```json
+{
+  "currency": "usd",
+  "priceAsOf": 1712345678,
+  "total": 52412.31,
+  "wallets": [
+    {
+      "id": "uuid",
+      "chain": "ethereum",
+      "address": "0xabc...",
+      "label": "Cold wallet",
+      "approximate": false,
+      "assets": [
+        { "asset": "ETH", "amount": "1.204", "fiatValue": 4200.11 },
+        { "asset": "USDC", "amount": "500", "fiatValue": 500.0 }
+      ],
+      "fiatValue": 4700.11
+    }
+  ]
+}
+```
+
+`fiatValue` is `null` (on the asset or the whole wallet) when no fresh cached price is available; such assets are excluded from `total`. `priceAsOf` is `null` when nothing priced.
+
+---
+
 ## Public / meta
 
 No auth on any of these.

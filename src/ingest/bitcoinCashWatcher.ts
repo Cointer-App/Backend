@@ -7,25 +7,25 @@ import type { NormalizedTx } from "../types";
 import { sleep } from "./esploraCommon";
 import { formatUnits } from "./format";
 
+interface BlockchairAddressData {
+  address?: { balance?: number };
+  transactions?: {
+    block_id: number;
+    transaction_hash?: string;
+    hash?: string;
+    time: string;
+    balance_change: number;
+  }[];
+}
+
 interface BlockchairAddressResponse {
-  data?: Record<
-    string,
-    {
-      transactions?: {
-        block_id: number;
-        transaction_hash?: string;
-        hash?: string;
-        time: string;
-        balance_change: number;
-      }[];
-    }
-  >;
+  data?: Record<string, BlockchairAddressData>;
   context?: { code?: number; error?: string };
 }
 
 export function parseBlockchairTxs(
   address: string,
-  entries: NonNullable<NonNullable<BlockchairAddressResponse["data"]>[string]["transactions"]>,
+  entries: NonNullable<BlockchairAddressData["transactions"]>,
 ): NormalizedTx[] {
   const out: NormalizedTx[] = [];
   for (const entry of entries) {
@@ -52,7 +52,7 @@ class BlockchairHttpError extends Error {
   }
 }
 
-async function fetchAddressTxs(address: string): Promise<NormalizedTx[] | null> {
+async function fetchBlockchairAddress(address: string): Promise<BlockchairAddressData | null> {
   const apiKeyParam = env.ingest.bitcoinCashExplorerApiKey
     ? `&key=${env.ingest.bitcoinCashExplorerApiKey}`
     : "";
@@ -78,9 +78,21 @@ async function fetchAddressTxs(address: string): Promise<NormalizedTx[] | null> 
     );
     return null;
   }
-  const entries = payload.data?.[address]?.transactions;
+  return payload.data?.[address] ?? null;
+}
+
+async function fetchAddressTxs(address: string): Promise<NormalizedTx[] | null> {
+  const data = await fetchBlockchairAddress(address);
+  const entries = data?.transactions;
   if (!entries) return null;
   return parseBlockchairTxs(address, entries);
+}
+
+/** Current confirmed balance in satoshis, from Blockchair's per-address summary. */
+export async function fetchBitcoinCashBalance(address: string): Promise<bigint | null> {
+  const data = await fetchBlockchairAddress(address);
+  const balance = data?.address?.balance;
+  return typeof balance === "number" ? BigInt(balance) : null;
 }
 
 export async function seedBitcoinCashAddress(
