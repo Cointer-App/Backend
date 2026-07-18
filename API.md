@@ -429,9 +429,9 @@ Deposits are priced at current cached prices, not the price at time of receipt. 
 
 ### GET /wallets/value
 
-Live current value for every address you're watching: the actual on-chain balance right now (not just what's been received), priced at the latest cached rate. Auth required.
+Current value for every address you're watching: the on-chain balance (not just what's been received), priced at the latest cached rate. Auth required.
 
-Balances are fetched directly from each chain (Esplora for Bitcoin/Litecoin, Blockchair for Bitcoin Cash, JSON-RPC `eth_getBalance`/`balanceOf` for Ethereum/Base, `getBalance`/token accounts for Solana), so they reflect coins moving both in and out, not just deposits. Results are cached per address for ~20 seconds to limit load on upstream RPCs/explorers, so polling this endpoint faster than that returns the same numbers. A wallet with a chain it currently can't reach (RPC/explorer error) comes back with an empty `assets` array rather than failing the whole request.
+Balances come from a background poller that queries each chain directly (Esplora for Bitcoin/Litecoin, Blockchair for Bitcoin Cash, JSON-RPC `eth_getBalance`/`balanceOf` for Ethereum/Base, `getBalance`/token accounts for Solana) on the same interval as that chain's deposit watcher, so they reflect coins moving both in and out, not just deposits. This endpoint only ever reads that cache, so it responds immediately regardless of how slow an upstream chain API is — it never blocks on a live RPC/explorer call. A wallet whose chain hasn't been polled yet (e.g. just added) or whose last poll failed comes back with an empty `assets` array rather than failing the whole request.
 
 Each wallet's `assets` includes the native coin plus any configured tokens (ERC-20 on Ethereum/Base, SPL on Solana) with a nonzero balance.
 

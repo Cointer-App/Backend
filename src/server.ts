@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { env } from "./config/env";
 import { resetDb } from "./db/client";
+import { startBalancePoller, stopBalancePoller } from "./ingest/balancePoller";
 import { startWatchers, stopWatchers } from "./ingest";
 import { globalRateLimit } from "./middleware/rateLimit";
 import { startPriceFeed, stopPriceFeed } from "./prices";
@@ -62,12 +63,14 @@ export function startServer() {
 
   startWatchers();
   startPriceFeed();
+  startBalancePoller();
 
   const shutdown = (signal: string) => {
     console.log(`[server] received ${signal}, shutting down`);
     clearInterval(retention);
     stopWatchers();
     stopPriceFeed();
+    stopBalancePoller();
     server.stop();
     resetDb();
     process.exit(0);
