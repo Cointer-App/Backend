@@ -38,12 +38,26 @@ export function cacheKeyFor(chain: string, address: string): string {
   return `${chain}:${address}`;
 }
 
+/**
+ * Merges freshly fetched assets into the cache by asset ticker rather than
+ * replacing the whole entry. A poll can return a subset of a wallet's assets
+ * (e.g. native coin succeeded but one token lookup failed) — merging keeps
+ * the last-known-good amount for whatever didn't come back instead of
+ * making it disappear from the dashboard.
+ */
 export function setCachedBalance(
   chain: string,
   address: string,
   assets: { asset: string; amount: string }[],
 ): void {
-  balanceCache.set(cacheKeyFor(chain, address), { assets, fetchedAt: Date.now() });
+  const key = cacheKeyFor(chain, address);
+  const existing = balanceCache.get(key);
+  const merged = new Map((existing?.assets ?? []).map((a) => [a.asset, a.amount]));
+  for (const a of assets) merged.set(a.asset, a.amount);
+  balanceCache.set(key, {
+    assets: [...merged].map(([asset, amount]) => ({ asset, amount })),
+    fetchedAt: Date.now(),
+  });
 }
 
 export function getCachedBalance(chain: string, address: string): CacheEntry | null {

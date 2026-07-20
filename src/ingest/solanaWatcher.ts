@@ -150,13 +150,17 @@ interface TokenAccountsResponse {
   value: { account: { data: { parsed: { info: { tokenAmount: { amount: string } } } } } }[];
 }
 
-/** Native SOL balance plus every configured SPL token balance for one address. */
+/**
+ * Native SOL balance plus every configured SPL token balance for one address.
+ * Each asset is fetched independently so one failing token lookup (rate
+ * limit, timeout) doesn't discard the balances that did succeed.
+ */
 export async function fetchSolanaBalances(
   rpcUrl: string,
   address: string,
   tokens: Erc20Token[],
 ): Promise<SolanaBalance[]> {
-  const [lamports, ...tokenAccounts] = await Promise.all([
+  const [lamportsResult, ...tokenResults] = await Promise.allSettled([
     rpc<number>(rpcUrl, "getBalance", [address]),
     ...tokens.map((token) =>
       rpc<TokenAccountsResponse>(rpcUrl, "getTokenAccountsByOwner", [
@@ -166,17 +170,33 @@ export async function fetchSolanaBalances(
       ]),
     ),
   ]);
-  const balances: SolanaBalance[] = [
-    { asset: "SOL", raw: BigInt(lamports), decimals: LAMPORTS_PER_SOL_DECIMALS },
-  ];
+
+  const balances: SolanaBalance[] = [];
+  if (lamportsResult.status === "fulfilled") {
+    balances.push({
+      asset: "SOL",
+      raw: BigInt(lamportsResult.value),
+      decimals: LAMPORTS_PER_SOL_DECIMALS,
+    });
+  } else {
+    console.error(`[balances:solana] getBalance failed for ${address}: ${lamportsResult.reason}`);
+  }
+
   tokens.forEach((token, i) => {
-    const accounts = tokenAccounts[i]!.value;
-    const raw = accounts.reduce(
-      (sum, acc) => sum + BigInt(acc.account.data.parsed.info.tokenAmount.amount),
-      0n,
-    );
-    balances.push({ asset: token.ticker, raw, decimals: token.decimals });
+    const result = tokenResults[i]!;
+    if (result.status === "fulfilled") {
+      const raw = result.value.value.reduce(
+        (sum, acc) => sum + BigInt(acc.account.data.parsed.info.tokenAmount.amount),
+        0n,
+      );
+      balances.push({ asset: token.ticker, raw, decimals: token.decimals });
+    } else {
+      console.error(
+        `[balances:solana] ${token.ticker} lookup failed for ${address}: ${result.reason}`,
+      );
+    }
   });
+
   return balances;
 }
 

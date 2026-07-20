@@ -123,7 +123,11 @@ export interface EvmBalance {
   decimals: number;
 }
 
-/** Native coin balance plus every configured ERC20 token balance for one address. */
+/**
+ * Native coin balance plus every configured ERC20 token balance for one
+ * address. Each asset is fetched independently so one failing token lookup
+ * (rate limit, timeout) doesn't discard the balances that did succeed.
+ */
 export async function fetchEvmBalances(
   rpcUrl: string,
   nativeAsset: string,
@@ -131,7 +135,7 @@ export async function fetchEvmBalances(
   tokens: Erc20Token[],
 ): Promise<EvmBalance[]> {
   const paddedAddress = `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
-  const [nativeHex, ...tokenResults] = await Promise.all([
+  const [nativeResult, ...tokenResults] = await Promise.allSettled([
     evmRpc<string>(rpcUrl, "eth_getBalance", [address, "latest"]),
     ...tokens.map((token) =>
       evmRpc<string>(rpcUrl, "eth_call", [
@@ -140,10 +144,25 @@ export async function fetchEvmBalances(
       ]),
     ),
   ]);
-  const balances: EvmBalance[] = [{ asset: nativeAsset, raw: BigInt(nativeHex), decimals: 18 }];
+
+  const balances: EvmBalance[] = [];
+  if (nativeResult.status === "fulfilled") {
+    balances.push({ asset: nativeAsset, raw: BigInt(nativeResult.value), decimals: 18 });
+  } else {
+    console.error(
+      `[balances] ${nativeAsset} getBalance failed for ${address}: ${nativeResult.reason}`,
+    );
+  }
+
   tokens.forEach((token, i) => {
-    balances.push({ asset: token.ticker, raw: BigInt(tokenResults[i]!), decimals: token.decimals });
+    const result = tokenResults[i]!;
+    if (result.status === "fulfilled") {
+      balances.push({ asset: token.ticker, raw: BigInt(result.value), decimals: token.decimals });
+    } else {
+      console.error(`[balances] ${token.ticker} balanceOf failed for ${address}: ${result.reason}`);
+    }
   });
+
   return balances;
 }
 
